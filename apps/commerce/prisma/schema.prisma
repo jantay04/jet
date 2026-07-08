@@ -1,0 +1,207 @@
+// JET Commerce — data model
+// Multi-tenant: every tenant-owned row carries storeId (shared DB, shared schema).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Accounts ─────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  stores    Store[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ── Tenant ───────────────────────────────────────────────
+
+model Store {
+  id           String      @id @default(cuid())
+  name         String
+  subdomain    String      @unique
+  customDomain String?     @unique
+  status       StoreStatus @default(DRAFT)
+
+  // Theme choice + design tokens (colors, fonts, logo, layout).
+  // This is exactly what JET Studio edits and JET AI generates.
+  themeId      String      @default("default")
+  config       Json        @default("{}")
+
+  ownerId      String
+  owner        User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  products     Product[]
+  collections  Collection[]
+  customers    Customer[]
+  orders       Order[]
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([ownerId])
+}
+
+enum StoreStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+// ── Catalog ──────────────────────────────────────────────
+
+model Product {
+  id          String           @id @default(cuid())
+  storeId     String
+  store       Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  title       String
+  slug        String
+  description String?
+  // Price in minor units (cents) to avoid float rounding.
+  priceCents  Int              @default(0)
+  currency    String           @default("USD")
+  images      String[]         @default([])
+  inventory   Int              @default(0)
+  status      ProductStatus    @default(ACTIVE)
+
+  variants    ProductVariant[]
+  collections Collection[]     @relation("ProductCollections")
+  orderItems  OrderItem[]
+
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([storeId, slug])
+  @@index([storeId])
+}
+
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+model ProductVariant {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  name       String   // e.g. "Size: L / Color: Black"
+  sku        String?
+  priceCents Int      @default(0)
+  inventory  Int      @default(0)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([productId])
+}
+
+model Collection {
+  id        String    @id @default(cuid())
+  storeId   String
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  title     String
+  slug      String
+  products  Product[] @relation("ProductCollections")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([storeId, slug])
+  @@index([storeId])
+}
+
+// ── Buyers & orders ──────────────────────────────────────
+
+model Customer {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  email     String
+  name      String?
+  orders    Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storeId, email])
+  @@index([storeId])
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  storeId      String
+  store        Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  customerId   String?
+  customer     Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  status       OrderStatus @default(PENDING)
+  totalCents   Int         @default(0)
+  currency     String      @default("USD")
+
+  items        OrderItem[]
+  payment      Payment?
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([storeId])
+  @@index([customerId])
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FULFILLED
+  CANCELLED
+  REFUNDED
+}
+
+model OrderItem {
+  id         String  @id @default(cuid())
+  orderId    String
+  order      Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId  String?
+  product    Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  title      String   // snapshot at purchase time
+  priceCents Int
+  quantity   Int      @default(1)
+
+  @@index([orderId])
+}
+
+model Payment {
+  id                    String        @id @default(cuid())
+  orderId               String        @unique
+  order                 Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  provider              String        @default("stripe")
+  providerPaymentId     String?       // e.g. Stripe PaymentIntent id
+  status                PaymentStatus @default(PENDING)
+  amountCents           Int
+  currency              String        @default("USD")
+
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
