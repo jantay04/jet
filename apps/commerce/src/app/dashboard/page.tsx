@@ -5,6 +5,10 @@ import { createStore } from "./actions";
 
 const APP_DOMAIN = process.env.NEXT_PUBLIC_APP_DOMAIN ?? "lvh.me:3000";
 
+// Reads from the database on every request — never prerender at build time
+// (there's no DB reachable during the Vercel build).
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
   const owner = await getDevOwner();
   const stores = await prisma.store.findMany({
